@@ -1,4 +1,4 @@
-# Boost-Converter-Based-Sine-Wave-Inverter-with-MPPT-Charge-Controller
+<img width="593" height="320" alt="image" src="https://github.com/user-attachments/assets/ba6e94f9-ab5a-4a2c-996f-ae82a8a5d46b" /># Boost-Converter-Based-Sine-Wave-Inverter-with-MPPT-Charge-Controller
 A compact, high-efficiency solar power system that converts 12V DC to 240V AC using a custom-designed boost converter, SPWM-based H-bridge inverter, and MPPT algorithm for optimal energy extraction.
 # Key Features
 Boost Converter (12V DC → 240V DC)
@@ -36,9 +36,21 @@ Modular PCBs with JST headers
 Boost Converter Simulation
 
 <img width="500" height="500" alt="image" src="https://github.com/user-attachments/assets/47041aea-b367-4fbc-9542-4909bb99235c" />
-Boost Converter PCB
+Boost Converter PCB (Single-Layer)
 
 <img width="500" height="500" alt="image" src="https://github.com/user-attachments/assets/edc9c60a-c620-41fc-961c-03eb4cbce569" />
 Boost Converter Hardware
+
+<img width="500" height="500" alt="image" src="https://github.com/user-attachments/assets/ee304ebf-afe3-43e8-bbf9-e23960b28d8f" />
+H-Bridge Inverter Simulation
+
+<img width="500" height="500" alt="image" src="https://github.com/user-attachments/assets/2e18db8f-2fac-4cf0-a24a-e573ff835e01" />
+H-Bridge Inverter PCB (Single-Layer)
+
+<img width="500" height="500" alt="image" src="https://github.com/user-attachments/assets/f801acde-f5b8-40e3-98b2-824781d8510f" />
+H-Bridge Inverter Hardware
+
+
+
 
 
