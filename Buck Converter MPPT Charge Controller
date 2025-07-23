@@ -1,0 +1,405 @@
+// Buck Converter Charge Controller with OLED Display - FIXED VERSION
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+// OLED Display configuration
+#define OLED_RESET 4
+Adafruit_SSD1306 display(OLED_RESET);
+
+#if (SSD1306_LCDHEIGHT != 32)
+#error("Height incorrect, please fix Adafruit_SSD1306.h!");
+#endif
+
+// Pin definitions
+const int pwmPin = 9;              // Timer1 PWM pin
+const int inputVoltagePin = A0;    // Input voltage feedback pin
+const int outputVoltagePin = A1;   // Output voltage feedback pin
+const int inputCurrentPin = A2;    // Input current feedback pin
+const int outputCurrentPin = A3;   // Output current feedback pin
+
+// PWM parameters
+const unsigned int timerTopValue = 319;  // For 50kHz PWM
+
+// Voltage divider scaling factors
+const float inputVoltageScaling = 30.33;  // For 220k and 7.5k resistors
+const float outputVoltageScaling = 13.0;  // For 120k and 10k resistors
+
+// Current sensor parameters
+const float currentScaling = 0.066;      // ACS712 (30A) scaling factor in V/A
+const float currentOffset = 2.5;        // ACS712 offset voltage at 0A
+
+// Target parameters
+const float targetVoltage = 14.4;       // Desired output voltage
+const float voltageThreshold = 0.1;    // Acceptable voltage deviation
+
+// Duty cycle limits
+const float minDutyCycle = 0.05;
+const float maxDutyCycle = 0.95;
+
+// Global variables
+float dutyCycle = 0.10;
+int displayMode = 0;  // 0 = Input values, 1 = Output values, 2 = Power & Duty
+unsigned long lastDisplayUpdate = 0;
+const unsigned long displayUpdateInterval = 2000;  // Change display every 2 seconds
+
+// IMPROVED Sensor validation thresholds
+const float minValidVoltage = 2.0;        // Minimum voltage to consider sensor connected
+const float minValidCurrent = 0.2;        // Minimum current to consider sensor active
+const int minValidADCVoltage = 100;       // Minimum ADC reading for voltage sensor (about 0.5V)
+const int maxFloatingADC = 50;            // Maximum ADC reading for floating pin
+const int minValidADCCurrent = 400;       // Minimum ADC for current sensor (around 2V)
+const int maxValidADCCurrent = 600;       // Maximum ADC for current sensor (around 3V)
+
+// Sensor connection status
+bool inputVoltageSensorConnected = false;
+bool outputVoltageSensorConnected = false;
+bool inputCurrentSensorConnected = false;
+bool outputCurrentSensorConnected = false;
+
+void setup() {
+    // Configure PWM pin
+    pinMode(pwmPin, OUTPUT);
+
+    // Initialize Timer1 for 50kHz PWM
+    setupTimer1();
+
+    // Initialize OLED display
+    display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+    display.display();
+    delay(2000);
+    display.clearDisplay();
+
+    // Start serial communication
+    Serial.begin(115200);
+    
+    // Display startup message
+    displayStartupMessage();
+    
+    // Check sensor connections on startup
+    checkSensorConnections();
+}
+
+void setupTimer1() {
+    cli();  // Stop interrupts
+
+    // Clear Timer1 control registers
+    TCCR1A = 0;
+    TCCR1B = 0;
+
+    // Configure Timer1 for Fast PWM mode
+    TCCR1A |= (1 << COM1A1) | (1 << WGM11);
+    TCCR1B |= (1 << WGM13) | (1 << WGM12) | (1 << CS10);
+
+    // Set TOP value for 50kHz
+    ICR1 = timerTopValue;
+
+    // Start with 10% duty cycle
+    OCR1A = (unsigned int)(dutyCycle * timerTopValue);
+
+    sei();  // Re-enable interrupts
+}
+
+void checkSensorConnections() {
+    // Check voltage sensors - look for stable readings above threshold
+    int inputVoltageADC = 0;
+    int outputVoltageADC = 0;
+    int inputCurrentADC = 0;
+    int outputCurrentADC = 0;
+    
+    // Take multiple readings to average out noise
+    for(int i = 0; i < 10; i++) {
+        inputVoltageADC += analogRead(inputVoltagePin);
+        outputVoltageADC += analogRead(outputVoltagePin);
+        inputCurrentADC += analogRead(inputCurrentPin);
+        outputCurrentADC += analogRead(outputCurrentPin);
+        delay(10);
+    }
+    
+    inputVoltageADC /= 10;
+    outputVoltageADC /= 10;
+    inputCurrentADC /= 10;
+    outputCurrentADC /= 10;
+    
+    // Voltage sensors - should read significant voltage when connected
+    inputVoltageSensorConnected = (inputVoltageADC > minValidADCVoltage);
+    outputVoltageSensorConnected = (outputVoltageADC > minValidADCVoltage);
+    
+    // Current sensors - should read around 2.5V (512 ADC) when at zero current
+    inputCurrentSensorConnected = (inputCurrentADC > minValidADCCurrent && inputCurrentADC < maxValidADCCurrent);
+    outputCurrentSensorConnected = (outputCurrentADC > minValidADCCurrent && outputCurrentADC < maxValidADCCurrent);
+    
+    // Print sensor status
+    Serial.println("=== SENSOR CONNECTION STATUS ===");
+    Serial.print("Input Voltage Sensor: ");
+    Serial.println(inputVoltageSensorConnected ? "CONNECTED" : "NOT CONNECTED");
+    Serial.print("Output Voltage Sensor: ");
+    Serial.println(outputVoltageSensorConnected ? "CONNECTED" : "NOT CONNECTED");
+    Serial.print("Input Current Sensor: ");
+    Serial.println(inputCurrentSensorConnected ? "CONNECTED" : "NOT CONNECTED");
+    Serial.print("Output Current Sensor: ");
+    Serial.println(outputCurrentSensorConnected ? "CONNECTED" : "NOT CONNECTED");
+    Serial.println("================================");
+}
+
+void loop() {
+    // Periodically recheck sensor connections
+    static unsigned long lastSensorCheck = 0;
+    if (millis() - lastSensorCheck > 5000) {  // Check every 5 seconds
+        checkSensorConnections();
+        lastSensorCheck = millis();
+    }
+    
+    // Read voltages and currents (only if sensors are connected)
+    float inputVoltage = inputVoltageSensorConnected ? readVoltage(inputVoltagePin, inputVoltageScaling) : 0.0;
+    float outputVoltage = outputVoltageSensorConnected ? readVoltage(outputVoltagePin, outputVoltageScaling) : 0.0;
+    float inputCurrent = inputCurrentSensorConnected ? readCurrent(inputCurrentPin, currentOffset, currentScaling) : 0.0;
+    float outputCurrent = outputCurrentSensorConnected ? readCurrent(outputCurrentPin, currentOffset, currentScaling) : 0.0;
+
+    // Calculate power (only if both voltage and current sensors are connected)
+    float inputPower = (inputVoltageSensorConnected && inputCurrentSensorConnected) ? inputVoltage * inputCurrent : 0.0;
+    float outputPower = (outputVoltageSensorConnected && outputCurrentSensorConnected) ? outputVoltage * outputCurrent : 0.0;
+
+    // Adjust duty cycle based on voltage (only if output voltage sensor is connected)
+    if (outputVoltageSensorConnected && inputVoltageSensorConnected) {
+        adjustDutyCycle(inputVoltage, outputVoltage);
+    }
+
+    // Update PWM signal
+    updateDutyCycle(dutyCycle);
+
+    // Print debug info to serial monitor
+    printDebugInfo(inputVoltage, inputCurrent, inputPower, outputVoltage, outputCurrent, outputPower, dutyCycle);
+
+    // Update OLED display
+    updateDisplay(inputVoltage, inputCurrent, inputPower, outputVoltage, outputCurrent, outputPower, dutyCycle);
+
+    delay(100);  // Small delay for stability
+}
+
+float readVoltage(int pin, float scalingFactor) {
+    int adcValue = analogRead(pin);
+    
+    // Only process if ADC value is above noise threshold
+    if (adcValue < minValidADCVoltage) {
+        return 0.0;
+    }
+    
+    return (adcValue * 5.0 / 1023.0) * scalingFactor;
+}
+
+float readCurrent(int pin, float offset, float scalingFactor) {
+    int adcValue = analogRead(pin);
+    
+    // Check if reading is in valid range for current sensor
+    if (adcValue < minValidADCCurrent || adcValue > maxValidADCCurrent) {
+        return 0.0;
+    }
+    
+    float sensorVoltage = (adcValue * 5.0 / 1023.0);
+    float current = (sensorVoltage - offset) / scalingFactor;
+
+    // Calibrate for discrepancies
+    if (current > -0.05 && current < 0.05) {
+        current = 0; // Eliminate noise near zero
+    }
+
+    // Fine-tune scaling
+    float calibrationFactor = 0.98; // Adjust based on testing
+    current *= calibrationFactor;
+
+    return current;
+}
+
+void adjustDutyCycle(float inputVoltage, float outputVoltage) {
+    // Only adjust if we have valid voltage readings
+    if (inputVoltage < minValidVoltage || outputVoltage < 0.1) {
+        return;  // Don't adjust if voltages are too low
+    }
+    
+    // Calculate the ideal duty cycle based on input voltage
+    float idealDutyCycle = targetVoltage / inputVoltage;
+
+    // Adjust the duty cycle based on output voltage
+    if (outputVoltage < targetVoltage - voltageThreshold) {
+        dutyCycle += 0.01;  // Gradual increase
+    } else if (outputVoltage > targetVoltage + voltageThreshold) {
+        dutyCycle -= 0.01;  // Gradual decrease
+    }
+
+    // Ensure duty cycle doesn't overshoot ideal range
+    if (dutyCycle > idealDutyCycle + 0.05) {
+        dutyCycle = idealDutyCycle + 0.05;
+    } else if (dutyCycle < idealDutyCycle - 0.05) {
+        dutyCycle = idealDutyCycle - 0.05;
+    }
+
+    // Constrain duty cycle to limits
+    dutyCycle = constrain(dutyCycle, minDutyCycle, maxDutyCycle);
+}
+
+void updateDutyCycle(float dutyCycle) {
+    unsigned int compareValue = (unsigned int)(dutyCycle * timerTopValue);
+    OCR1A = compareValue;
+}
+
+void printDebugInfo(float inputVoltage, float inputCurrent, float inputPower,
+                    float outputVoltage, float outputCurrent, float outputPower, float dutyCycle) {
+    Serial.print("Input: ");
+    Serial.print(inputVoltageSensorConnected ? String(inputVoltage, 2) + "V" : "--V");
+    Serial.print(", ");
+    Serial.print(inputCurrentSensorConnected ? String(inputCurrent, 2) + "A" : "--A");
+    Serial.print(", ");
+    Serial.print((inputVoltageSensorConnected && inputCurrentSensorConnected) ? String(inputPower, 2) + "W" : "--W");
+    
+    Serial.print(" | Output: ");
+    Serial.print(outputVoltageSensorConnected ? String(outputVoltage, 2) + "V" : "--V");
+    Serial.print(", ");
+    Serial.print(outputCurrentSensorConnected ? String(outputCurrent, 2) + "A" : "--A");
+    Serial.print(", ");
+    Serial.print((outputVoltageSensorConnected && outputCurrentSensorConnected) ? String(outputPower, 2) + "W" : "--W");
+    
+    Serial.print(" | Duty: ");
+    Serial.print(dutyCycle * 100, 1);
+    Serial.println("%");
+}
+
+void displayStartupMessage() {
+    display.clearDisplay();
+    displayText("Buck Converter", 10, 0, 1, false);
+    displayText("Charge Controller", 5, 10, 1, false);
+    displayText("Initializing...", 15, 20, 1, false);
+    display.drawRect(1, 1, 126, 31, WHITE);
+    display.display();
+    delay(3000);
+}
+
+void updateDisplay(float inputVoltage, float inputCurrent, float inputPower,
+                   float outputVoltage, float outputCurrent, float outputPower, float dutyCycle) {
+    
+    // Check if it's time to update display mode
+    if (millis() - lastDisplayUpdate > displayUpdateInterval) {
+        displayMode = (displayMode + 1) % 3;  // Cycle through 3 display modes
+        lastDisplayUpdate = millis();
+    }
+    
+    display.clearDisplay();
+    
+    switch (displayMode) {
+        case 0:  // Input values
+            displayInputValues(inputVoltage, inputCurrent, inputPower);
+            break;
+        case 1:  // Output values
+            displayOutputValues(outputVoltage, outputCurrent, outputPower);
+            break;
+        case 2:  // Power and Duty Cycle
+            displayPowerAndDuty(inputPower, outputPower, dutyCycle);
+            break;
+    }
+    
+    display.drawRect(1, 1, 126, 31, WHITE);
+    display.display();
+}
+
+void displayInputValues(float voltage, float current, float power) {
+    displayText("INPUT VALUES", 20, 2, 1, false);
+    
+    // Display voltage
+    if (inputVoltageSensorConnected && voltage > minValidVoltage) {
+        String voltageStr = "V:" + String(voltage, 1) + "V";
+        displayText(voltageStr, 5, 12, 1, false);
+    } else {
+        displayText("V: --", 5, 12, 1, false);
+    }
+    
+    // Display current
+    if (inputCurrentSensorConnected && abs(current) > minValidCurrent) {
+        String currentStr = "I:" + String(current, 2) + "A";
+        displayText(currentStr, 65, 12, 1, false);
+    } else {
+        displayText("I: --", 65, 12, 1, false);
+    }
+    
+    // Display power
+    if (inputVoltageSensorConnected && inputCurrentSensorConnected && power > 0.1) {
+        String powerStr = "P:" + String(power, 1) + "W";
+        displayText(powerStr, 5, 22, 1, false);
+    } else {
+        displayText("P: --", 5, 22, 1, false);
+    }
+}
+
+void displayOutputValues(float voltage, float current, float power) {
+    displayText("OUTPUT VALUES", 18, 2, 1, false);
+    
+    // Display voltage
+    if (outputVoltageSensorConnected && voltage > minValidVoltage) {
+        String voltageStr = "V:" + String(voltage, 1) + "V";
+        displayText(voltageStr, 5, 12, 1, false);
+    } else {
+        displayText("V: --", 5, 12, 1, false);
+    }
+    
+    // Display current
+    if (outputCurrentSensorConnected && abs(current) > minValidCurrent) {
+        String currentStr = "I:" + String(current, 2) + "A";
+        displayText(currentStr, 65, 12, 1, false);
+    } else {
+        displayText("I: --", 65, 12, 1, false);
+    }
+    
+    // Display power
+    if (outputVoltageSensorConnected && outputCurrentSensorConnected && power > 0.1) {
+        String powerStr = "P:" + String(power, 1) + "W";
+        displayText(powerStr, 5, 22, 1, false);
+    } else {
+        displayText("P: --", 5, 22, 1, false);
+    }
+}
+
+void displayPowerAndDuty(float inputPower, float outputPower, float dutyCycle) {
+    displayText("POWER & CONTROL", 12, 2, 1, false);
+    
+    // Display input power
+    if (inputVoltageSensorConnected && inputCurrentSensorConnected && inputPower > 0.1) {
+        String inPowerStr = "Pin:" + String(inputPower, 1);
+        displayText(inPowerStr, 5, 12, 1, false);
+    } else {
+        displayText("Pin:--", 5, 12, 1, false);
+    }
+    
+    // Display output power
+    if (outputVoltageSensorConnected && outputCurrentSensorConnected && outputPower > 0.1) {
+        String outPowerStr = "Pout:" + String(outputPower, 1);
+        displayText(outPowerStr, 70, 12, 1, false);
+    } else {
+        displayText("Pout:--", 70, 12, 1, false);
+    }
+    
+    // Display duty cycle (always show)
+    String dutyStr = "Duty:" + String(dutyCycle * 100, 0) + "%";
+    displayText(dutyStr, 5, 22, 1, false);
+    
+    // Display efficiency
+    bool inputValid = inputVoltageSensorConnected && inputCurrentSensorConnected && inputPower > 0.1;
+    bool outputValid = outputVoltageSensorConnected && outputCurrentSensorConnected && outputPower > 0.1;
+    
+    if (inputValid && outputValid && inputPower > 0) {
+        float efficiency = (outputPower / inputPower) * 100;
+        String effStr = "Eff:" + String(efficiency, 0) + "%";
+        displayText(effStr, 70, 22, 1, false);
+    } else {
+        displayText("Eff:--", 70, 22, 1, false);
+    }
+}
+
+void displayText(String text, int x, int y, int size, boolean d) {
+    display.setTextSize(size);
+    display.setTextColor(WHITE);
+    display.setCursor(x, y);
+    display.println(text);
+    if (d) {
+        display.display();
+    }
+}
