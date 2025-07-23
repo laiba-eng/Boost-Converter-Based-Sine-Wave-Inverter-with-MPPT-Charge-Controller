@@ -32,13 +32,13 @@ Load Support: Up to 100W
 Modular PCBs with JST headers
 
 # Simulations & Hardware
-<img width="1047" height="403" alt="image" src="https://github.com/user-attachments/assets/ecfd8235-9e62-4776-b842-4ffc3613f2d4" />
+<img width="500" height="500" alt="image" src="https://github.com/user-attachments/assets/ecfd8235-9e62-4776-b842-4ffc3613f2d4" />
 Boost Converter Simulation
 
-<img width="800" height="320" alt="image" src="https://github.com/user-attachments/assets/47041aea-b367-4fbc-9542-4909bb99235c" />
+<img width="500" height="500" alt="image" src="https://github.com/user-attachments/assets/47041aea-b367-4fbc-9542-4909bb99235c" />
 Boost Converter PCB
 
-<img width="593" height="334" alt="image" src="https://github.com/user-attachments/assets/edc9c60a-c620-41fc-961c-03eb4cbce569" />
+<img width="500" height="500" alt="image" src="https://github.com/user-attachments/assets/edc9c60a-c620-41fc-961c-03eb4cbce569" />
 Boost Converter Hardware
 
 
