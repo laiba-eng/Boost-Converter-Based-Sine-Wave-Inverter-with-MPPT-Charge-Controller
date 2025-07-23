@@ -1,0 +1,86 @@
+// Sine wave parameters
+const int carrierFreq = 20000; // 20 kHz
+const int sineFreq = 50;       // 50 Hz
+const int resolution = 256;    // Resolution of sine wave
+
+int sineTable[256];
+
+// Boost converter PWM pin
+const int pwmPin = 11; // Changed to pin 11
+
+void setup() {
+  // Setup for sine wave generation
+  pinMode(9, OUTPUT);  // HS-L
+  pinMode(10, OUTPUT); // HS-R
+  generateSineTable();
+
+  // Setup for boost converter
+  pinMode(pwmPin, OUTPUT);
+  setupBoostConverter();
+}
+
+void loop() {
+  // Sine wave generation
+  for (int i = 0; i < resolution; i++) {
+    int dutyCycle = sineTable[i];
+    analogWrite(9, dutyCycle);       // Output for HS-L
+    analogWrite(10, 255 - dutyCycle); // Complementary for HS-R
+    delayMicroseconds(1000000 / (carrierFreq * resolution));
+  }
+
+  // Boost converter PWM runs automatically in the background (Timer hardware)
+}
+
+void generateSineTable() {
+  for (int i = 0; i < resolution; i++) {
+    sineTable[i] = (sin(2 * PI * i / resolution) + 1) * 127.5; // Normalized sine wave
+  }
+}
+
+void setupBoostConverter() {
+  // Pin 11 is controlled by Timer2 OC2A, not OC2B (which is pin 3)
+  
+  // Configure Timer2 for 50 kHz PWM
+  TCCR2A = 0;  // Clear control registers
+  TCCR2B = 0;
+
+  // Set Timer2 to Fast PWM mode with OCR2A as top
+  TCCR2A |= (1 << WGM20) | (1 << WGM21);  // Fast PWM
+  TCCR2B |= (1 << WGM22);
+
+  // Set non-inverting mode for OC2A (Pin 11)
+  TCCR2A |= (1 << COM2A1);  // Changed from COM2B1 to COM2A1
+
+  // Set the prescaler to 8 for 50 kHz frequency
+  TCCR2B |= (1 << CS21);
+
+  // Set top value for 50 kHz frequency
+  OCR2A = 39;  // (16,000,000 / (50,000 * 8)) - 1 = 39
+
+  // Set duty cycle to 90% using OCR2B instead
+  // This creates a different approach since now OCR2A is both the TOP value and our PWM output
+  
+  // For pin 11 (OC2A), we need to modify the setup approach
+  // We'll use Timer1 instead which gives more flexibility
+  
+  // Reset Timer1 registers
+  TCCR1A = 0;
+  TCCR1B = 0;
+  
+  // Set Timer1 to Fast PWM mode with ICR1 as top
+  TCCR1A |= (1 << WGM11);
+  TCCR1B |= (1 << WGM12) | (1 << WGM13);
+  
+  // Set non-inverting mode for OC1A (Pin 9, already used) and OC1B (Pin 10, already used)
+  // and also enable OC1C which is pin 11 on some Arduino boards
+  TCCR1A |= (1 << COM1B1);
+  
+  // Set prescaler to 1 for maximum resolution
+  TCCR1B |= (1 << CS10);
+  
+  // Set top value for approximately 50 kHz
+  ICR1 = 319;  // 16MHz/50kHz = 320, minus 1 = 319
+  
+  // Set duty cycle to 90%
+  OCR1B = 287;  // 90% of 319 = 287.1
+}
