@@ -50,6 +50,15 @@ H-Bridge Inverter PCB (Single-Layer)
 <img width="500" height="500" alt="image" src="https://github.com/user-attachments/assets/f801acde-f5b8-40e3-98b2-824781d8510f" />
 H-Bridge Inverter Hardware
 
+<img width="500" height="500" alt="image" src="https://github.com/user-attachments/assets/ab07a1fd-e350-4c8c-92c4-d610d3d85994" />
+Gate Driver Simulation
+
+<img width="500" height="500" alt="image" src="https://github.com/user-attachments/assets/eefbaa1d-8e8d-468d-a070-4c4827619f24" />
+Gate Driver PCB (Single-Layer)
+
+<img width="500" height="500" alt="image" src="https://github.com/user-attachments/assets/f30498e9-1c38-447e-8b0f-5ae9220fae25" />
+Gate Driver Hardware
+
 
 
 
